@@ -1,12 +1,16 @@
-#include "views/gamelist/DetailedGameListView.h"
+#include "views/gamelist/GridGameListView.h"
 
 #include "animations/LambdaAnimation.h"
+#include "views/UIModeController.h"
 #include "views/ViewController.h"
+#include "CollectionSystemManager.h"
+#include "Settings.h"
+#include "SystemData.h"
 
-DetailedGameListView::DetailedGameListView(Window* window, FileData* root) :
-	BasicGameListView(window, root),
+GridGameListView::GridGameListView(Window* window, FileData* root) :
+	ISimpleGameListView(window, root),
+	mGrid(window),
 	mDescContainer(window), mDescription(window),
-	mImage(window),
 
 	mLblRating(window), mLblReleaseDate(window), mLblDeveloper(window), mLblPublisher(window),
 	mLblGenre(window), mLblPlayers(window), mLblLastPlayed(window), mLblPlayCount(window),
@@ -15,21 +19,14 @@ DetailedGameListView::DetailedGameListView(Window* window, FileData* root) :
 	mGenre(window), mPlayers(window), mLastPlayed(window), mPlayCount(window),
 	mName(window)
 {
-	//mHeaderImage.setPosition(mSize.x() * 0.25f, 0);
-
 	const float padding = 0.01f;
 
-	mList.setPosition(mSize.x() * (0.50f + padding), mList.getPosition().y());
-	mList.setSize(mSize.x() * (0.50f - padding), mList.getSize().y());
-	mList.setAlignment(TextListComponent<FileData*>::ALIGN_LEFT);
-	mList.setCursorChangedCallback([&](const CursorState& /*state*/) { updateInfoPanel(); });
+	mGrid.setPosition(mSize.x() * 0.1f, mSize.y() * 0.1f);
+	mGrid.setDefaultZIndex(20);
+	mGrid.setCursorChangedCallback([&](const CursorState& /*state*/) { updateInfoPanel(); });
+	addChild(&mGrid);
 
-	// image
-	mImage.setOrigin(0.5f, 0.5f);
-	mImage.setPosition(mSize.x() * 0.25f, mList.getPosition().y() + mSize.y() * 0.2125f);
-	mImage.setMaxSize(mSize.x() * (0.50f - 2*padding), mSize.y() * 0.4f);
-	mImage.setDefaultZIndex(30);
-	addChild(&mImage);
+	populateList(root->getChildrenListToDisplay());
 
 	// metadata labels + values
 	mLblRating.setText("Rating: ");
@@ -81,20 +78,82 @@ DetailedGameListView::DetailedGameListView(Window* window, FileData* root) :
 	updateInfoPanel();
 }
 
-void DetailedGameListView::onThemeChanged(const std::shared_ptr<ThemeData>& theme)
+FileData* GridGameListView::getCursor()
 {
-	BasicGameListView::onThemeChanged(theme);
+	return mGrid.getSelected();
+}
+
+void GridGameListView::setCursor(FileData* file)
+{
+	if(!mGrid.setCursor(file))
+	{
+		populateList(file->getParent()->getChildrenListToDisplay());
+		mGrid.setCursor(file);
+	}
+}
+
+std::string GridGameListView::getQuickSystemSelectRightButton()
+{
+	return "pagedown"; //rightshoulder
+}
+
+std::string GridGameListView::getQuickSystemSelectLeftButton()
+{
+	return "pageup"; //leftshoulder
+}
+
+bool GridGameListView::input(InputConfig* config, Input input)
+{
+	if(config->isMappedLike("left", input) || config->isMappedLike("right", input))
+		return GuiComponent::input(config, input);
+
+	return ISimpleGameListView::input(config, input);
+}
+
+const std::string GridGameListView::getImagePath(FileData* file)
+{
+	ImageSource src = mGrid.getImageSource();
+
+	if (src == ImageSource::IMAGE)
+		return file->getImagePath();
+	else if (src == ImageSource::MARQUEE)
+		return file->getMarqueePath();
+
+	return file->getThumbnailPath();
+}
+
+void GridGameListView::populateList(const std::vector<FileData*>& files)
+{
+	mGrid.clear();
+	mHeaderText.setText(mRoot->getSystem()->getFullName());
+	if (files.size() > 0)
+	{
+		for (auto it = files.cbegin(); it != files.cend(); it++)
+		{
+			mGrid.add((*it)->getName(), getImagePath(*it), *it);
+		}
+	}
+	else
+	{
+		addPlaceholder();
+	}
+}
+
+void GridGameListView::onThemeChanged(const std::shared_ptr<ThemeData>& theme)
+{
+	ISimpleGameListView::onThemeChanged(theme);
 
 	using namespace ThemeFlags;
-	mImage.applyTheme(theme, getName(), "md_image", POSITION | ThemeFlags::SIZE | Z_INDEX | ROTATION | VISIBLE);
+
+	mGrid.applyTheme(theme, getName(), "gamegrid", ALL);
 	mName.applyTheme(theme, getName(), "md_name", ALL);
 
 	initMDLabels();
 	std::vector<TextComponent*> labels = getMDLabels();
 	assert(labels.size() == 8);
 	const char* lblElements[8] = {
-		"md_lbl_rating", "md_lbl_releasedate", "md_lbl_developer", "md_lbl_publisher",
-		"md_lbl_genre", "md_lbl_players", "md_lbl_lastplayed", "md_lbl_playcount"
+			"md_lbl_rating", "md_lbl_releasedate", "md_lbl_developer", "md_lbl_publisher",
+			"md_lbl_genre", "md_lbl_players", "md_lbl_lastplayed", "md_lbl_playcount"
 	};
 
 	for(unsigned int i = 0; i < labels.size(); i++)
@@ -107,8 +166,8 @@ void DetailedGameListView::onThemeChanged(const std::shared_ptr<ThemeData>& them
 	std::vector<GuiComponent*> values = getMDValues();
 	assert(values.size() == 8);
 	const char* valElements[8] = {
-		"md_rating", "md_releasedate", "md_developer", "md_publisher",
-		"md_genre", "md_players", "md_lastplayed", "md_playcount"
+			"md_rating", "md_releasedate", "md_developer", "md_publisher",
+			"md_genre", "md_players", "md_lastplayed", "md_playcount"
 	};
 
 	for(unsigned int i = 0; i < values.size(); i++)
@@ -120,10 +179,12 @@ void DetailedGameListView::onThemeChanged(const std::shared_ptr<ThemeData>& them
 	mDescription.setSize(mDescContainer.getSize().x(), 0);
 	mDescription.applyTheme(theme, getName(), "md_description", ALL ^ (POSITION | ThemeFlags::SIZE | ThemeFlags::ORIGIN | TEXT | ROTATION));
 
+	populateList(mRoot->getChildrenListToDisplay());
+
 	sortChildren();
 }
 
-void DetailedGameListView::initMDLabels()
+void GridGameListView::initMDLabels()
 {
 	std::vector<TextComponent*> components = getMDLabels();
 
@@ -154,7 +215,7 @@ void DetailedGameListView::initMDLabels()
 	}
 }
 
-void DetailedGameListView::initMDValues()
+void GridGameListView::initMDValues()
 {
 	std::vector<TextComponent*> labels = getMDLabels();
 	std::vector<GuiComponent*> values = getMDValues();
@@ -188,18 +249,16 @@ void DetailedGameListView::initMDValues()
 	mDescContainer.setSize(mDescContainer.getSize().x(), mSize.y() - mDescContainer.getPosition().y());
 }
 
-void DetailedGameListView::updateInfoPanel()
+void GridGameListView::updateInfoPanel()
 {
-	FileData* file = (mList.size() == 0 || mList.isScrolling()) ? NULL : mList.getSelected();
+	FileData* file = (mGrid.size() == 0 || mGrid.isScrolling()) ? NULL : mGrid.getSelected();
 
 	bool fadingOut;
 	if(file == NULL)
 	{
-		//mImage.setImage("");
 		//mDescription.setText("");
 		fadingOut = true;
 	}else{
-		mImage.setImage(file->getImagePath());
 		mDescription.setText(file->metadata.get("desc"));
 		mDescContainer.reset();
 
@@ -221,7 +280,6 @@ void DetailedGameListView::updateInfoPanel()
 	}
 
 	std::vector<GuiComponent*> comps = getMDValues();
-	comps.push_back(&mImage);
 	comps.push_back(&mDescription);
 	comps.push_back(&mName);
 	std::vector<TextComponent*> labels = getMDLabels();
@@ -235,7 +293,7 @@ void DetailedGameListView::updateInfoPanel()
 		// an animation is not playing
 		//   then animate if opacity != our target opacity
 		if((comp->isAnimationPlaying(0) && comp->isAnimationReversed(0) != fadingOut) ||
-			(!comp->isAnimationPlaying(0) && comp->getOpacity() != (fadingOut ? 0 : 255)))
+		   (!comp->isAnimationPlaying(0) && comp->getOpacity() != (fadingOut ? 0 : 255)))
 		{
 			auto func = [comp](float t)
 			{
@@ -246,16 +304,48 @@ void DetailedGameListView::updateInfoPanel()
 	}
 }
 
-void DetailedGameListView::launch(FileData* game)
+void GridGameListView::addPlaceholder()
 {
-	Vector3f target(Renderer::getScreenWidth() / 2.0f, Renderer::getScreenHeight() / 2.0f, 0);
-	if(mImage.hasImage())
-		target = Vector3f(mImage.getCenter().x(), mImage.getCenter().y(), 0);
-
-	ViewController::get()->launch(game, target);
+	// empty grid - add a placeholder
+	FileData* placeholder = new FileData(PLACEHOLDER, "<No Entries Found>", this->mRoot->getSystem()->getSystemEnvData(), this->mRoot->getSystem());
+	mGrid.add(placeholder->getName(), "", placeholder);
 }
 
-std::vector<TextComponent*> DetailedGameListView::getMDLabels()
+void GridGameListView::launch(FileData* game)
+{
+	ViewController::get()->launch(game);
+}
+
+void GridGameListView::remove(FileData *game, bool deleteFile)
+{
+	if (deleteFile)
+		Utils::FileSystem::removeFile(game->getPath());  // actually delete the file on the filesystem
+	FileData* parent = game->getParent();
+	if (getCursor() == game)                     // Select next element in list, or prev if none
+	{
+		std::vector<FileData*> siblings = parent->getChildrenListToDisplay();
+		auto gameIter = std::find(siblings.cbegin(), siblings.cend(), game);
+		int gamePos = (int)std::distance(siblings.cbegin(), gameIter);
+		if (gameIter != siblings.cend())
+		{
+			if ((gamePos + 1) < (int)siblings.size())
+			{
+				setCursor(siblings.at(gamePos + 1));
+			} else if ((gamePos - 1) > 0) {
+				setCursor(siblings.at(gamePos - 1));
+			}
+		}
+	}
+	mGrid.remove(game);
+	if(mGrid.size() == 0)
+	{
+		addPlaceholder();
+	}
+	delete game;                                 // remove before repopulating (removes from parent)
+	onFileChanged(parent, FILE_REMOVED);           // update the view, with game removed
+}
+
+std::vector<TextComponent*> GridGameListView::getMDLabels()
 {
 	std::vector<TextComponent*> ret;
 	ret.push_back(&mLblRating);
@@ -269,7 +359,7 @@ std::vector<TextComponent*> DetailedGameListView::getMDLabels()
 	return ret;
 }
 
-std::vector<GuiComponent*> DetailedGameListView::getMDValues()
+std::vector<GuiComponent*> GridGameListView::getMDValues()
 {
 	std::vector<GuiComponent*> ret;
 	ret.push_back(&mRating);
@@ -281,4 +371,25 @@ std::vector<GuiComponent*> DetailedGameListView::getMDValues()
 	ret.push_back(&mLastPlayed);
 	ret.push_back(&mPlayCount);
 	return ret;
+}
+
+std::vector<HelpPrompt> GridGameListView::getHelpPrompts()
+{
+	std::vector<HelpPrompt> prompts;
+
+	if(Settings::getInstance()->getBool("QuickSystemSelect"))
+		prompts.push_back(HelpPrompt("lr", "system"));
+	prompts.push_back(HelpPrompt("up/down/left/right", "choose"));
+	prompts.push_back(HelpPrompt("a", "launch"));
+	prompts.push_back(HelpPrompt("b", "back"));
+	if(!UIModeController::getInstance()->isUIModeKid())
+		prompts.push_back(HelpPrompt("select", "options"));
+	if(mRoot->getSystem()->isGameSystem())
+		prompts.push_back(HelpPrompt("x", "random"));
+	if(mRoot->getSystem()->isGameSystem() && !UIModeController::getInstance()->isUIModeKid())
+	{
+		std::string prompt = CollectionSystemManager::get()->getEditingCollection();
+		prompts.push_back(HelpPrompt("y", prompt));
+	}
+	return prompts;
 }
